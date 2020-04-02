@@ -31,6 +31,7 @@ import java.util.UUID;
 
 public class MainActivity extends AppCompatActivity {
 
+    // Tested on a API 23+ device so requestPermission is needed should also run with API 21 if the requestPermission in line 48 is removed
     private static final int M = 23;
     private RecyclerView recyclerView;
     private MyAdapter mAdapter;
@@ -45,11 +46,13 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         requestPermissions(new String[]{"android.permission.ACCESS_FINE_LOCATION"},1);
+        // This is for displaying a list
         recyclerView = findViewById(R.id.list);
         layoutManager = new LinearLayoutManager(this);
         recyclerView.setLayoutManager(layoutManager);
         mAdapter = new MyAdapter(myDataset);
         recyclerView.setAdapter(mAdapter);
+        // start scanning and advertising
         scanLeDevice();
         advertise();
     }
@@ -66,6 +69,8 @@ public class MainActivity extends AppCompatActivity {
         bluetoothAdapter = bluetoothManager.getAdapter();
         mScanning = true;
         UUID[] uuids = new UUID[]{UUID.fromString("7823C5DE-BFC9-4BC6-8E60-2280A22FED01")};
+        // scanns for device with specified service uuid forever (not recommended, for better power efficency scanning should be limited)
+        // when a device is found leScanCallback is called
         bluetoothAdapter.startLeScan(uuids, leScanCallback);
 
     }
@@ -79,15 +84,45 @@ public class MainActivity extends AppCompatActivity {
                         @Override
                         public void run() {
                             if(!alreadyScanned.contains(device.getAddress())){
+                                //device hasn't been scanned before, add it to list now
                                 alreadyScanned.add(device.getAddress());
-                                myDataset.add(new RecyclerData().withTitle(device.toString()).withDescription("test"));
-                                mAdapter.notifyData(myDataset);
+                                //myDataset.add(new RecyclerData().withTitle(device.toString()).withDescription("test"));
+                                //mAdapter.notifyData(myDataset);
+                                // connect to device to query unique id, gattCallback is called upon success
                                 device.connectGatt(t, false, gattCallback);
                             }
                         }
                     });
                 }
             };
+    
+    @RequiresApi(M)
+    private BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
+        @Override
+        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            //When connection state changes to connected, discover services
+            if(newState == BluetoothGatt.STATE_CONNECTED)
+                gatt.discoverServices();
+        }
+
+        @Override
+        public void onServicesDiscovered(final BluetoothGatt gatt, int status) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    for (BluetoothGattService service : gatt.getServices()) {
+                        if (service.getUuid().toString().equalsIgnoreCase("7823C5DE-BFC9-4BC6-8E60-2280A22FED01")) {
+                            // our service has been discovered add it with timestamp and uuid to the list
+                            myDataset.add(new RecyclerData().withDescription(Calendar.getInstance().getTime().toString()).withTitle(service.getCharacteristics().get(0).getUuid().toString()));                       
+                            mAdapter.notifyData(myDataset);
+                        }
+
+                    }
+                }
+            });
+        }
+
+    };
 
     @RequiresApi(M)
     void advertise(){
@@ -125,31 +160,4 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-    @RequiresApi(M)
-    private BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
-        @Override
-        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-            if(newState == BluetoothGatt.STATE_CONNECTED)
-                gatt.discoverServices();
-        }
-
-        @Override
-        public void onServicesDiscovered(final BluetoothGatt gatt, int status) {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    for (BluetoothGattService service : gatt.getServices()) {
-                        if (service.getUuid().toString().equalsIgnoreCase("7823C5DE-BFC9-4BC6-8E60-2280A22FED01")) {
-                            gatt.readCharacteristic(service.getCharacteristics().get(0));
-                            myDataset.add(new RecyclerData().withTitle(gatt.getDevice().toString()).withDescription("UUID: " + service.getCharacteristics().get(0).getUuid()));
-                            myDataset.add(new RecyclerData().withDescription(Calendar.getInstance().getTime().toString()).withTitle(service.getCharacteristics().get(0).getUuid().toString()));
-                            mAdapter.notifyData(myDataset);
-                        }
-
-                    }
-                }
-            });
-        }
-
-    };
 }
